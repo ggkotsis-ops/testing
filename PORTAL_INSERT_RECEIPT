@@ -1,0 +1,793 @@
+CREATE OR REPLACE Procedure EURO.Portal_Insert_Receipt
+    (Ocomp         In     Number,
+     Ogroup        In     Number,
+     Oplcyno       In     Number,
+     Orcptno       In     Number,
+     Oseir         In     Varchar2,
+     Otype         In     Number,
+     ORunId        In     Number,
+     OSortId       In     Number,         
+     Ostatus       In Out Number,
+     Omsg          In Out Varchar2) 
+  Is
+   My_Exception           Exception;
+   My_Sqlerrm             Varchar2(1000);
+   Ocount                 Number(8)                              := 0;
+   Ocount_taxy            Number(8)                              := 0;
+   Ocount_Policy          Number(8)                              := 0;
+   Osqlcode               Number(10)                             := 0;
+   Omyid                  Number(10)                             := 0; 
+   Oentol                 Pre_Tampay.Pre_Tampay_Entol%Type       := Null;
+   Oegruser               Pre_Tampay.Pre_Tampay_Egr_User%Type    := Null; 
+   Odebtdate              Pre_Tampay.Pre_Tampay_Debt_Date%Type   := Null;   
+   Ocanceldate            Pre_Tampay.Pre_Tampay_Cancel_Date%Type := Null;
+   Odosesnum              Pre_Tampay.Pre_Tampay_Doses_Num%Type   := 0;
+   OSeir4Search           Pre_Tampay.Pre_Tampay_Seir%Type        := '0';
+   
+   Obligation_Description Varchar2(255)                          := Null;
+   Obligation_Status      Number(2)                              := 0; 
+   
+   ORecordType            Number(2)                              := 0;
+   OPayStatus             Number(2)                              := 0;
+   Row4commit             pls_integer                            := 0;
+   commit_every           pls_integer                            := 10000;
+   ONumber                Varchar2(100)                          := Null;
+   OMainProgramm          Varchar2(50)                           := 'Portal_v1';
+   OSubProgramm           Varchar2(50)                           := 'Portal_Insert_Receipt';    
+   OProgramUnit           Varchar2(32)                           := $$plsql_unit;
+  
+
+
+ /* -------------------------------------------------------------------------------------------------------------------------------------
+   Η ρουτινα καλειτε από τις εκδόσεις και τις Βραδυνες διαδικασίες
+     εαν το TYPE είναι
+     0 = Βραδυνές διαδικασίες γεμίσματος cheetah
+     1 = Από έκδοση συμβολαίου / απόδειξης / ανανεώσεις
+   -------------------------------------------------------------------------------------------------------------------------------------  */
+
+   -- Συμβολαιο
+   Cursor My_Cursor_Portal_policy Is     
+          Select Ph_Tplch_Group                  , 
+                 Ph_Tplch_Plcy_No                ,
+                 Ph_Tplch_Rcpt_No                ,
+                 Ph_Tplch_Seir                   ,
+                 Ph_Tplch_Seir_Desc              ,
+                 Ph_Tplch_Start_Date             ,
+                 Ph_Tplch_Xpry_Date              ,
+                 Ph_Tplch_Next_Adgust_Date       ,
+                 Ph_Tplch_Issue_Date             ,
+                 Ph_Tplch_Prem                   ,
+                 Ph_Tplch_Status                 ,
+                 Ph_Tplch_Status_Description     ,
+                 Ph_Tplch_Isvisible              ,
+                 Ph_Tplch_Order                  ,
+                 Ph_Tplch_Doc_Id                 ,
+                 Ph_Tplch_Mobile_View            ,
+                 Print_Referenceid               ,
+                 Contractid                      ,
+                 Record_Type                     ,
+                 IsNextRenewal                   ,
+                 original_record_type
+            From Webuser.Mis_Ph_Print_Portal_V1
+           Where Ph_Tplch_Plcy_No = Decode(Oplcyno,0,Ph_Tplch_Plcy_No,Oplcyno)
+             And Ph_Tplch_Group   = Decode(Ogroup,0,Ph_Tplch_Group,Ogroup)
+             And Ph_Tplch_Rcpt_No = Decode(Orcptno,0,Ph_Tplch_Rcpt_No,Orcptno)
+            -- And Ph_Tplch_Seir    = Decode(Oseir,'0',Ph_Tplch_Seir,Oseir)
+             And Record_Type      = 0;
+   My_Row_Portal_policy  My_Cursor_Portal_policy%Rowtype;
+
+   Cursor My_Cursor_Portal_Taxy Is     
+          Select Ph_Tplch_Group                  , 
+                 Ph_Tplch_Plcy_No                ,
+                 Ph_Tplch_Rcpt_No                ,
+                 Ph_Tplch_Seir                   ,
+                 Ph_Tplch_Seir_Desc              ,
+                 Ph_Tplch_Start_Date             ,
+                 Ph_Tplch_Xpry_Date              ,
+                 Ph_Tplch_Next_Adgust_Date       ,
+                 Ph_Tplch_Issue_Date             ,
+                 Ph_Tplch_Prem                   ,
+                 Ph_Tplch_Status                 ,
+                 Ph_Tplch_Status_Description     ,
+                 Ph_Tplch_Isvisible              ,
+                 Ph_Tplch_Order                  ,
+                 Ph_Tplch_Doc_Id                 ,
+                 Ph_Tplch_Mobile_View            ,
+                 Print_Referenceid               ,
+                 Contractid                      ,
+                 Record_Type                     ,
+                 Isnextrenewal                   ,
+                 original_record_type
+            From Webuser.Mis_Ph_Print_Portal_V1
+           Where Ph_Tplch_Plcy_No = Decode(Oplcyno,0,Ph_Tplch_Plcy_No,Oplcyno)
+             And Ph_Tplch_Group   = Decode(Ogroup,0,Ph_Tplch_Group,Ogroup)
+             And Ph_Tplch_Rcpt_No = Decode(Orcptno,0,Ph_Tplch_Rcpt_No,Orcptno)
+             --And Ph_Tplch_Seir    = Decode(Oseir,'0',Ph_Tplch_Seir,Oseir)
+             And Record_Type      = 4
+             And Ph_Tplch_Prem    > 0;
+   My_Row_Portal_Taxy  My_Cursor_Portal_Taxy%Rowtype;
+
+
+   Cursor My_Cursor_Portal_Receipt Is     
+          Select Ph_Tplch_Group                  , 
+                 Ph_Tplch_Plcy_No                ,
+                 Ph_Tplch_Rcpt_No                ,
+                 Ph_Tplch_Seir                   ,
+                 Ph_Tplch_Seir_Desc              ,
+                 Ph_Tplch_Start_Date             ,
+                 Ph_Tplch_Xpry_Date              ,
+                 Ph_Tplch_Next_Adgust_Date       ,
+                 Ph_Tplch_Issue_Date             ,
+                 Ph_Tplch_Prem                   ,
+                 Ph_Tplch_Status                 ,
+                 Ph_Tplch_Status_Description     ,
+                 Ph_Tplch_Isvisible              ,
+                 Ph_Tplch_Order                  ,
+                 Ph_Tplch_Doc_Id                 ,
+                 Ph_Tplch_Mobile_View            ,
+                 Print_Referenceid               ,
+                 Contractid                      ,
+                 Record_Type                     ,
+                 Isnextrenewal                   ,
+                 Original_record_type                 
+            From Webuser.Mis_Ph_Print_Portal_V1
+           Where Ph_Tplch_Plcy_No = Decode(Oplcyno,0,Ph_Tplch_Plcy_No,Oplcyno)
+             And Ph_Tplch_Group   = Decode(Ogroup,0,Ph_Tplch_Group,Ogroup)
+             And Ph_Tplch_Rcpt_No = Decode(Orcptno,0,Ph_Tplch_Rcpt_No,Orcptno)
+             --And Ph_Tplch_Seir    = Decode(Oseir,'0',Ph_Tplch_Seir,Oseir)
+             And Record_Type Not in (0,4); 
+   My_Row_Portal_Receipt  My_Cursor_Portal_Receipt%Rowtype;
+
+
+
+   -- Παιρνουμε τις ετήσιες επόμλένης περιόδου τα συμβολαια γι ανα τα παμε στον Contract
+   Cursor My_Cursor_Portal_Next Is     
+          Select Branch            ,
+                 Contractno        , 
+                 Receiptno         ,
+                 Seir            
+            From Webuser.Portal_Receipt
+           Where Contractno    = Decode(Oplcyno,0,Contractno,Oplcyno)
+             And Branch        = Decode(Ogroup,0,Branch,Ogroup)
+             And Receiptno     = Decode(Orcptno,0,Receiptno,Orcptno) 
+             --And Seir          = Decode(Oseir,'0',Seir,Oseir)
+             And Isnextrenewal = 1; 
+   My_Row_Portal_Next  My_Cursor_Portal_Next%Rowtype;
+
+
+
+   Begin
+   
+       Ostatus    := 01; 
+       Ocount     := 00;
+
+      -- Κραταμε Log τις διαδικασίες 
+      If Otype = 0 Then
+         ONumber := 'Start';
+         Ph_Batchprocess_Timestamp(ORunId,OMainProgramm,OSortId,OSubProgramm,'Start');
+      End If;
+
+      -- Συμβολαιο
+      Open My_Cursor_Portal_policy;
+           Fetch My_Cursor_Portal_policy Into My_Row_Portal_policy;         
+           Loop
+              Exit When My_Cursor_Portal_policy%NotFound;
+                 
+                   OSeir4Search := My_Row_Portal_policy.Ph_Tplch_Seir;
+                   
+                   IF My_Row_Portal_policy.Ph_Tplch_Group < 9 then 
+                      If My_Row_Portal_policy.Ph_Tplch_Seir in (0,1) Then 
+                         OSeir4Search := 'ΑΑ';
+                      End If;
+                      If My_Row_Portal_policy.Ph_Tplch_Seir = 2 Then 
+                         OSeir4Search := 'ΓΓ';
+                      End If;
+                      If My_Row_Portal_policy.Ph_Tplch_Seir = 3 Then 
+                         OSeir4Search := 'ΠΠ';
+                      End If;
+                   end If;
+
+                   IF My_Row_Portal_policy.Ph_Tplch_Group > 9 then 
+                      If My_Row_Portal_policy.Ph_Tplch_Seir = 0 Then 
+                         OSeir4Search := '1';
+                      End If;
+                      
+                      My_Row_Portal_policy.Ph_Tplch_Xpry_Date := My_Row_Portal_policy.Ph_Tplch_Next_Adgust_Date;
+                      
+                   End if;   
+                 
+                   Begin
+                      Select Pre_tampay_Entol,Pre_Tampay_Egr_User, Pre_Tampay_Debt_Date, Pre_Tampay_Cancel_Date,Pre_Tampay_Doses_Num
+                        Into OEntol, OEgrUser, OdebtDate, Ocanceldate, ODosesNum
+                        From Pre_Tampay
+                       Where Pre_Tampay_Plcy_No = My_Row_Portal_policy.Ph_Tplch_Plcy_No
+                         And Pre_Tampay_Rcpt_No = My_Row_Portal_policy.Ph_Tplch_Rcpt_No
+                         And Pre_Tampay_Seir    = OSeir4Search
+                         And Pre_Tampay_Group   = My_Row_Portal_policy.Ph_Tplch_Group;
+                   Exception
+                        When Others Then 
+                             OEntol       := Null; 
+                             OEgrUser     := Null; 
+                             OdebtDate    := Null; 
+                             Ocanceldate  := Null; 
+                             ODosesNum    := 1;
+                   End;
+
+                   -- Σημαινει ΣΥμβολαιο
+                   orecordType := 1;
+                   
+                   -- Φτιαχνουμε την ενδειξη εαν ειναι εισπραγμενο ή όχι
+                   If My_Row_Portal_policy.Ph_Tplch_Status in (4,6) Then 
+                      OPayStatus := 0;
+                   Else
+                      OPayStatus := 1;
+                   End if;   
+                  
+                  
+                   Insert Into Webuser.Portal_Receipt
+                             ( Branch                                            ,  -- Number(2)
+                               Contractno                                        ,  -- Number(8)
+                               Receiptno                                         ,  -- Number(8)
+                               Seir                                              ,  -- Varchar2(2)
+                               Collector                                         ,  -- Varchar2(4)
+                               Start_Date                                        ,  -- Date
+                               Xpry_Date                                         ,  -- Date
+                               Paymentcode                                       ,  -- Varchar2(25)
+                               Debt_Date                                         ,  -- Date
+                               Cancel_Date                                       ,  -- Date
+                               Ispaid                                            ,  -- Number(1)
+                               Receipttype                                       ,  -- Number(1)
+                               IsPaperVisible                                    ,  -- Number(1)
+                               Instalment                                        ,  -- Number(2)
+                               Premium                                           ,  -- Number(12,2)
+                               Statusdescr                                       ,  -- Varchar2(255)
+                               IsNextRenewal                                     ,  -- Number(1) 
+                               Insertdate                                        ,
+                               original_record_type                              )
+                      Values ( My_Row_Portal_policy.Ph_Tplch_Group               ,
+                               My_Row_Portal_policy.Ph_Tplch_Plcy_No             ,
+                               My_Row_Portal_policy.Ph_Tplch_Rcpt_No             ,
+                               My_Row_Portal_policy.Ph_Tplch_Seir                ,
+                               Oentol                                            , 
+                               My_Row_Portal_policy.Ph_Tplch_Start_Date          ,
+                               My_Row_Portal_policy.Ph_Tplch_Xpry_Date           ,
+                               Oegruser                                          ,
+                               Odebtdate                                         ,
+                               Ocanceldate                                       ,  
+                               OPayStatus                                        ,
+                               orecordType                                       , 
+                               My_Row_Portal_policy.Ph_Tplch_Isvisible           ,
+                               Odosesnum                                         ,
+                               My_Row_Portal_policy.Ph_Tplch_Prem                ,
+                               My_Row_Portal_policy.PH_TPLCH_SEIR_DESC           ,
+                               My_Row_Portal_policy.IsNextRenewal                ,
+                               Sysdate                                           ,
+                               My_Row_Portal_policy.original_record_type         );
+                   Commit;
+
+              FETCH My_Cursor_Portal_policy INTO My_Row_Portal_policy;
+           END LOOP;
+      CLOSE My_Cursor_Portal_policy;
+
+      Commit;
+    
+If Otype = 0 Then
+  ONumber := '1';
+  Ph_Batchprocess_Timestamp(ORunId,OMainProgramm,OSortId,OSubProgramm,ONumber);
+End If;
+
+
+   -- ταχυπληρωμων
+      Open My_Cursor_Portal_Taxy;
+           Fetch My_Cursor_Portal_Taxy Into My_Row_Portal_Taxy;         
+           Loop
+              Exit When My_Cursor_Portal_Taxy%NotFound;
+                 
+                   OSeir4Search := My_Row_Portal_taxy.Ph_Tplch_Seir;
+                   
+                   
+                   IF My_Row_Portal_Taxy.Ph_Tplch_Group < 9 then 
+                      If My_Row_Portal_Taxy.Ph_Tplch_Seir in (0,1) Then 
+                         OSeir4Search := 'ΑΑ';
+                      End If;
+                      If My_Row_Portal_Taxy.Ph_Tplch_Seir = 2 Then 
+                         OSeir4Search := 'ΓΓ';
+                      End If;
+                      If My_Row_Portal_Taxy.Ph_Tplch_Seir = 3 Then 
+                         OSeir4Search := 'ΠΠ';
+                      End If;
+                   end If;
+
+                   IF My_Row_Portal_Taxy.Ph_Tplch_Group > 9 then 
+                      If My_Row_Portal_Taxy.Ph_Tplch_Seir = 0 Then 
+                         OSeir4Search := '1';
+                      End If;   
+                   End If;
+                 
+                 
+                      Begin
+                         Select Pre_tampay_Entol,Pre_Tampay_Egr_User, Pre_Tampay_Debt_Date, Pre_Tampay_Cancel_Date,Pre_Tampay_Doses_Num
+                           Into OEntol, OEgrUser, OdebtDate, Ocanceldate, ODosesNum
+                           From Pre_Tampay
+                          Where Pre_Tampay_Plcy_No = My_Row_Portal_Taxy.Ph_Tplch_Plcy_No
+                            And Pre_Tampay_Rcpt_No = My_Row_Portal_Taxy.Ph_Tplch_Rcpt_No
+                            And Pre_Tampay_Seir    = OSeir4Search
+                            And Pre_Tampay_Group   = My_Row_Portal_Taxy.Ph_Tplch_Group;
+                      Exception
+                           When Others Then 
+                                OEntol       := Null; 
+                                OEgrUser     := Null; 
+                                OdebtDate    := Null; 
+                                Ocanceldate  := Null; 
+                                ODosesNum    := 1;
+                      End;
+
+                      OrecordType := 4;
+                      
+                      -- Φτιαχνουμε την ενδειξη εαν ειναι εισπραγμενο ή όχι
+                      If My_Row_Portal_Taxy.Ph_Tplch_Status in (4,6) Then 
+                         OPayStatus := 0;
+                      Else
+                         OPayStatus := 1;
+                      End if;                         
+                      
+                      -- Σε περιπτωση που το στατους είναι 6, σημαινει ότι είναι ανεισπρτακτο, αλλά δεν έχω efile Ταχυπληρωμής. Τότε την γυρναω σε αποδειξη για να βγαινει σωστό μηνυμα
+                      -- Να δω εαν ομως χρειαζετε σε ολα τα seir ή μονο στο ΑΑ
+                      If My_Row_Portal_Taxy.Ph_Tplch_Status = 6 Then 
+                         -- 27/02/2021 To If αλλιως ηταν καρφωτα  OrecordType := 0;
+                         If My_Row_Portal_Taxy.Ph_Tplch_Group = 19 And    
+                            My_Row_Portal_Taxy.Ph_Tplch_Seir  = 0  Then
+                            OrecordType := 4;
+                         Else   
+                            OrecordType := 0;
+                         End If;   
+                      End if;
+                      
+                      
+                      Insert Into Webuser.Portal_Receipt
+                                ( Branch                                            ,  -- Number(2)
+                                  Contractno                                        ,  -- Number(8)
+                                  Receiptno                                         ,  -- Number(8)
+                                  Seir                                              ,  -- Varchar2(2)
+                                  Collector                                         ,  -- Varchar2(4)
+                                  Start_Date                                        ,  -- Date
+                                  Xpry_Date                                         ,  -- Date
+                                  Paymentcode                                       ,  -- Varchar2(25)
+                                  Debt_Date                                         ,  -- Date
+                                  Cancel_Date                                       ,  -- Date
+                                  Ispaid                                            ,  -- Number(1)
+                                  Receipttype                                       ,  -- Number(1)
+                                  IsPaperVisible                                    ,  -- Number(1)
+                                  Instalment                                        ,  -- Number(2)
+                                  Premium                                           ,  -- Number(12,2)
+                                  Statusdescr                                       ,  -- Varchar2(255)
+                                  IsNextRenewal                                     ,
+                                  Insertdate                                        ,
+                                  original_record_type                              )                                  
+                         Values ( My_Row_Portal_Taxy.Ph_Tplch_Group                 ,
+                                  My_Row_Portal_Taxy.Ph_Tplch_Plcy_No               ,
+                                  My_Row_Portal_Taxy.Ph_Tplch_Rcpt_No               ,
+                                  My_Row_Portal_Taxy.Ph_Tplch_Seir                  ,
+                                  Oentol                                            , 
+                                  My_Row_Portal_Taxy.Ph_Tplch_Start_Date            ,
+                                  My_Row_Portal_Taxy.Ph_Tplch_Xpry_Date             ,
+                                  Oegruser                                          ,
+                                  Odebtdate                                         ,
+                                  Ocanceldate                                       ,  
+                                  OPayStatus                                        ,
+                                  ORecordType                                       , 
+                                  My_Row_Portal_Taxy.Ph_Tplch_Isvisible             ,
+                                  Odosesnum                                         ,
+                                  My_Row_Portal_Taxy.Ph_Tplch_Prem                  ,
+                                  My_Row_Portal_Taxy.PH_TPLCH_SEIR_DESC             ,
+                                  My_Row_Portal_Taxy.IsNextRenewal                  ,
+                                  Sysdate                                           ,
+                                  My_Row_Portal_Taxy.original_record_type           );
+                      Commit;
+
+              FETCH My_Cursor_Portal_Taxy INTO My_Row_Portal_Taxy;
+           END LOOP;
+      CLOSE My_Cursor_Portal_Taxy;
+      Commit;
+
+
+If Otype = 0 Then
+    -- Φτιαχνουμε τους Index εδω και όχι στο τελος της διαδικασίας, γιατί κάνουμε Select count(*)
+    Webuser.Trunc_Webuser_Tables(ORunId,10,7,0); 
+/*
+    begin
+      dbms_stats.gather_table_stats(ownname          => 'WEBUSER',
+                                    tabname          => 'PORTAL_RECEIPT',
+                                    estimate_percent => 100,
+                                    method_opt       => 'FOR ALL COLUMNS SIZE AUTO',
+                                    cascade          => TRUE,
+                                    degree           => 20);
+    end;
+    */
+    ONumber := '2';
+    Ph_Batchprocess_Timestamp(ORunId,OMainProgramm,OSortId,OSubProgramm,ONumber);
+End If;
+
+   -- Αποδειξης δοσεων 
+      Open My_Cursor_Portal_Receipt;
+           Fetch My_Cursor_Portal_Receipt Into My_Row_Portal_Receipt;         
+           Loop
+              Exit When My_Cursor_Portal_Receipt%NotFound;
+                 
+                   OSeir4Search := My_Row_Portal_Receipt.Ph_Tplch_Seir;
+                   
+                   IF My_Row_Portal_Receipt.Ph_Tplch_Group < 9 then 
+                      If My_Row_Portal_Receipt.Ph_Tplch_Seir in (0,1) Then 
+                         OSeir4Search := 'ΑΑ';
+                      End If;
+                      If My_Row_Portal_Receipt.Ph_Tplch_Seir = 2 Then 
+                         OSeir4Search := 'ΓΓ';
+                      End If;
+                      If My_Row_Portal_Receipt.Ph_Tplch_Seir = 3 Then 
+                         OSeir4Search := 'ΠΠ';
+                      End If;
+                   end If;
+
+                   IF My_Row_Portal_Receipt.Ph_Tplch_Group > 9 then 
+                      If My_Row_Portal_Receipt.Ph_Tplch_Seir = 0 Then 
+                         OSeir4Search := '1';
+                      End If;   
+                   End If;
+                 
+         /*
+                   Select Count(*)
+                     Into ocount_taxy
+                     From Webuser.Portal_Receipt
+                    Where Contractno  = My_Row_Portal_Receipt.Ph_Tplch_Plcy_No 
+                      And Receiptno   = My_Row_Portal_Receipt.Ph_Tplch_Rcpt_No 
+                      And Seir        = My_Row_Portal_Receipt.Ph_Tplch_Seir
+                      And Branch      = My_Row_Portal_Receipt.Ph_Tplch_Group
+                      And Receipttype = 4;
+*/
+
+                   Select count(*)
+                     Into ocount_taxy
+                     From Webuser.Mis_Ph_Print_Portal_V1
+                    Where Ph_Tplch_Plcy_No = My_Row_Portal_Receipt.Ph_Tplch_Plcy_No
+                      And Ph_Tplch_Group   = My_Row_Portal_Receipt.Ph_Tplch_Group
+                      And Ph_Tplch_Rcpt_No = My_Row_Portal_Receipt.Ph_Tplch_Rcpt_No 
+                      And Record_Type      = 4;
+
+
+/*
+                   Select Count(*)
+                     Into ocount_Policy
+                     From Webuser.Portal_Receipt
+                    Where Contractno  = My_Row_Portal_Receipt.Ph_Tplch_Plcy_No 
+                      And Receiptno   = My_Row_Portal_Receipt.Ph_Tplch_Rcpt_No 
+                      And Seir        = My_Row_Portal_Receipt.Ph_Tplch_Seir
+                      And Branch      = My_Row_Portal_Receipt.Ph_Tplch_Group
+                      And Receipttype = 0
+                      And IsPaid      = 0;
+*/
+
+                   Select count(*)
+                     Into ocount_Policy
+                     From Webuser.Mis_Ph_Print_Portal_V1
+                    Where Ph_Tplch_Plcy_No = My_Row_Portal_Receipt.Ph_Tplch_Plcy_No
+                      And Ph_Tplch_Group   = My_Row_Portal_Receipt.Ph_Tplch_Group
+                      And Ph_Tplch_Rcpt_No = My_Row_Portal_Receipt.Ph_Tplch_Rcpt_No 
+                      And Record_Type      = 0
+                      aND Ph_Tplch_Status  = 4;
+
+                      
+
+                     --ROUF FOR JUST A DAY
+                     Insert Into Webuser.Portal_Receipt_Petros
+                                ( Branch                                            ,  -- Number(2)
+                                  Contractno                                        ,  -- Number(8)
+                                  Receiptno                                         ,  -- Number(8)
+                                  Seir                                              ,  -- Varchar2(2)
+                                  Ocount_Taxy                                       ,
+                                  Ocount_Policy                                     ,
+                                  Insertdate                                        )                                  
+                         Values ( My_Row_Portal_Receipt.Ph_Tplch_Group               ,
+                                  My_Row_Portal_Receipt.Ph_Tplch_Plcy_No             ,
+                                  My_Row_Portal_Receipt.Ph_Tplch_Rcpt_No             ,
+                                  My_Row_Portal_Receipt.Ph_Tplch_Seir                ,
+                                  Ocount_Taxy                                        , 
+                                  Ocount_Policy                                      ,
+                                  Sysdate                                            );
+         
+
+                      
+                   If ocount_taxy = 0 And ocount_Policy = 0 Then 
+                      Begin
+                         Select Pre_tampay_Entol,Pre_Tampay_Egr_User, Pre_Tampay_Debt_Date, Pre_Tampay_Cancel_Date,Pre_Tampay_Doses_Num
+                           Into OEntol, OEgrUser, OdebtDate, Ocanceldate, ODosesNum
+                           From Pre_Tampay
+                          Where Pre_Tampay_Plcy_No = My_Row_Portal_Receipt.Ph_Tplch_Plcy_No
+                            And Pre_Tampay_Rcpt_No = My_Row_Portal_Receipt.Ph_Tplch_Rcpt_No
+                            And Pre_Tampay_Seir    = OSeir4Search
+                            And Pre_Tampay_Group   = My_Row_Portal_Receipt.Ph_Tplch_Group;
+                      Exception
+                           When Others Then 
+                                OEntol       := Null; 
+                                OEgrUser     := Null; 
+                                OdebtDate    := Null; 
+                                Ocanceldate  := Null; 
+                                ODosesNum    := 1;
+                      End;
+
+
+
+                      ORecordType := 0;
+                      Insert Into Webuser.Portal_Receipt
+                                ( Branch                                            ,  -- Number(2)
+                                  Contractno                                        ,  -- Number(8)
+                                  Receiptno                                         ,  -- Number(8)
+                                  Seir                                              ,  -- Varchar2(2)
+                                  Collector                                         ,  -- Varchar2(4)
+                                  Start_Date                                        ,  -- Date
+                                  Xpry_Date                                         ,  -- Date
+                                  Paymentcode                                       ,  -- Varchar2(25)
+                                  Debt_Date                                         ,  -- Date
+                                  Cancel_Date                                       ,  -- Date
+                                  Ispaid                                            ,  -- Number(1)
+                                  Receipttype                                       ,  -- Number(1)
+                                  IsPaperVisible                                    ,  -- Number(1)
+                                  Instalment                                        ,  -- Number(2)
+                                  Premium                                           ,  -- Number(12,2)
+                                  Statusdescr                                       ,  -- Varchar2(255)
+                                  IsNextRenewal                                     ,
+                                  Insertdate                                        ,
+                                  original_record_type                              )                                  
+                         Values ( My_Row_Portal_Receipt.Ph_Tplch_Group               ,
+                                  My_Row_Portal_Receipt.Ph_Tplch_Plcy_No             ,
+                                  My_Row_Portal_Receipt.Ph_Tplch_Rcpt_No             ,
+                                  My_Row_Portal_Receipt.Ph_Tplch_Seir                ,
+                                  Oentol                                             , 
+                                  My_Row_Portal_Receipt.Ph_Tplch_Start_Date          ,
+                                  My_Row_Portal_Receipt.Ph_Tplch_Xpry_Date           ,
+                                  Oegruser                                           ,
+                                  Odebtdate                                          ,
+                                  Ocanceldate                                        ,  
+                                  Decode(My_Row_Portal_Receipt.Ph_Tplch_Status,4,0,1),
+                                  ORecordType                                        , 
+                                  EURO.Find_receiptTypeafterPaid(My_Row_Portal_Receipt.Ph_Tplch_Group,
+                                                                 My_Row_Portal_Receipt.Ph_Tplch_Plcy_No,
+                                                                 My_Row_Portal_Receipt.Ph_Tplch_Rcpt_No,
+                                                                 My_Row_Portal_Receipt.Ph_Tplch_Seir,
+                                                                 My_Row_Portal_Receipt.original_record_type,
+                                                                 1,1)                ,
+                                  Odosesnum                                          ,
+                                  My_Row_Portal_Receipt.Ph_Tplch_Prem                ,
+                                  My_Row_Portal_Receipt.PH_TPLCH_SEIR_DESC           ,
+                                  My_Row_Portal_Receipt.IsNextRenewal                ,
+                                  Sysdate                                            ,
+                                  My_Row_Portal_Receipt.original_record_type          );
+                   End If;
+                   Commit;
+
+              FETCH My_Cursor_Portal_Receipt INTO My_Row_Portal_Receipt;
+           END LOOP;
+      CLOSE My_Cursor_Portal_Receipt;
+      Commit;
+
+        
+      If Otype = 0 Then
+         ONumber := '2';
+         Ph_Batchprocess_Timestamp(ORunId,OMainProgramm,OSortId,OSubProgramm,ONumber);
+      End If;
+
+      Begin 
+        Open My_Cursor_Portal_Next;
+           Fetch My_Cursor_Portal_Next Into My_Row_Portal_Next;         
+           Loop
+              Exit When My_Cursor_Portal_Next%NotFound; 
+
+                   Euro.Portal_Insert_Tplch_Next_v1(OComp                        ,
+                                                    My_Row_Portal_Next.Branch    ,
+                                                    My_Row_Portal_Next.ContractNo,
+                                                    My_Row_Portal_Next.ReceiptNo ,
+                                                    My_Row_Portal_Next.Seir      ,
+                                                    Otype                        ,
+                                                    ORunId                       ,
+                                                    OSortId                      ,
+                                                    Ostatus                      ,
+                                                    Omsg                         );
+
+                   FETCH My_Cursor_Portal_Next INTO My_Row_Portal_Next;
+            END LOOP;
+       CLOSE My_Cursor_Portal_Next;
+      Exception
+         When Others Then
+              OStatus := 99;
+              Omsg    := 99;
+      End;
+      
+      Commit;
+
+If Otype = 0 Then 
+   Update Webuser.Portal_Receipt
+      Set Obligation_Description =  Case     
+            When Trunc(Sysdate) <= Nvl(Debt_Date,To_Date('31/12/2999','Dd/Mm/Yyyy')) Then 
+               'Η επόμενη ημερομηνία πληρωμής του συμβολαίου σας με αριθμό '||CONTRACTNO ||' και αριθμό απόδειξης '|| RECEIPTNO ||' είναι '||To_char(DEBT_DATE,'dd/mm/yyyy')||' με ποσό €'||TO_CHAR(PREMIUM,'99g990d00') 
+            When Nvl(Debt_Date,To_Date('31/12/2999','Dd/Mm/Yyyy')) < Trunc(Sysdate) And Trunc(Sysdate) < (Nvl(Cancel_Date,To_Date('31/12/2999','Dd/Mm/Yyyy')) - 10 ) Then
+                'Έχετε ληξιπρόθεσμη οφειλή ποσού € '||TO_CHAR(PREMIUM,'99g990d00')||' που αφορά το συμβόλαιό σας με αριθμό '||CONTRACTNO ||' και αριθμό απόδειξης '|| RECEIPTNO 
+             ELSE
+                'Το συμβόλαιό σας με αριθμό '||CONTRACTNO ||' και αριθμό απόδειξης '|| RECEIPTNO || ' πρόκειται να ακυρωθεί σύντομα.'  
+          END        
+    Where Premium > 0
+      And Ispaid  = 0
+      And Branch != 19
+      And Cancel_Date Is Not Null;
+   Commit;              
+   
+   Update Webuser.Portal_Receipt
+      Set (Obligation_Status) =  Case     
+            When Trunc(Sysdate) <= Nvl(Debt_Date,To_Date('31/12/2999','Dd/Mm/Yyyy')) Then 
+                 1
+            When Nvl(Debt_Date,To_Date('31/12/2999','Dd/Mm/Yyyy')) < Trunc(Sysdate) And Trunc(Sysdate) < (Nvl(Cancel_Date,To_Date('31/12/2999','Dd/Mm/Yyyy')) - 10 ) Then
+                2
+             Else
+                3
+          End        
+    Where Premium > 0
+      And Ispaid = 0
+      And Branch != 19
+      And Cancel_Date Is Not Null;
+   Commit;              
+   
+   Update Webuser.Portal_Receipt
+      Set Obligation_Description =  Case     
+            When Trunc(Sysdate) <= Nvl(Debt_Date,To_Date('31/12/2999','dd/mm/yyyy')) - 10  THEN 
+               'Η επόμενη ημερομηνία πληρωμής του συμβολαίου σας με αριθμό '||CONTRACTNO ||' και αριθμό απόδειξης '|| RECEIPTNO ||' είναι '||To_char(DEBT_DATE,'dd/mm/yyyy')||' με ποσό €'||TO_CHAR(PREMIUM,'99g990d00') 
+             ELSE
+                'Το συμβόλαιό σας με αριθμό '||CONTRACTNO ||' και αριθμό απόδειξης '|| RECEIPTNO || ' πρόκειται να ακυρωθεί σύντομα.'  
+          END        
+    Where Premium > 0
+      And Ispaid = 0
+      And Branch = 19
+      And Cancel_Date Is Not Null;
+   Commit;              
+   
+   Update Webuser.Portal_Receipt
+      Set (Obligation_Status) =  Case     
+            When Trunc(Sysdate) <= Nvl(Debt_Date,To_Date('31/12/2999','dd/mm/yyyy')) - 10  THEN 
+                 1
+             Else
+                3
+             End        
+    Where Premium      > 0
+      And Ispaid      = 0
+      And Branch      = 19
+      And Cancel_Date Is Not Null;
+   Commit;             
+   
+    Insert Into Webuser.Portal_Receipt
+                             ( Branch                                            ,  -- Number(2)
+                               Contractno                                        ,  -- Number(8)
+                               Receiptno                                         ,  -- Number(8)
+                               Seir                                              ,  -- Varchar2(2)
+                               Collector                                         ,  -- Varchar2(4)
+                               Start_Date                                        ,  -- Date
+                               Xpry_Date                                         ,  -- Date
+                               Paymentcode                                       ,  -- Varchar2(25)
+                               Debt_Date                                         ,  -- Date
+                               Cancel_Date                                       ,  -- Date
+                               Ispaid                                            ,  -- Number(1)
+                               Receipttype                                       ,  -- Number(1)
+                               IsPaperVisible                                    ,  -- Number(1)
+                               Instalment                                        ,  -- Number(2)
+                               Premium                                           ,  -- Number(12,2)
+                               Statusdescr                                       ,  -- Varchar2(255)
+                               IsNextRenewal                                     ,  -- Number(1) 
+                               Insertdate                                        ,
+                               original_record_type                              )
+                      Values ( 4               ,
+                               6131684             ,
+                               634771             ,
+                               2                ,
+                               '0000'                                            , 
+                               '17/4/2022'          ,
+                               '17/10/2022'           ,
+                               null                                          ,
+                               null                                         ,
+                               null                                       ,  
+                               1                                        ,
+                               1                                       , 
+                               1           ,
+                               1                                         ,
+                               0                ,
+                               'Τροποποίηση Συμβολαίου'           ,
+                               0                ,
+                               Sysdate                                           ,
+                               0         );
+                               
+                   Commit;
+End If;
+
+-- Από OnLine
+If Otype = 1 Then 
+   Update Webuser.Portal_Receipt
+      Set Obligation_Description =  Case     
+            When Trunc(Sysdate) <= Nvl(Debt_Date,To_Date('31/12/2999','Dd/Mm/Yyyy')) Then 
+               'Η επόμενη ημερομηνία πληρωμής του συμβολαίου σας με αριθμό '||CONTRACTNO ||' και αριθμό απόδειξης '|| RECEIPTNO ||' είναι '||To_char(DEBT_DATE,'dd/mm/yyyy')||' με ποσό €'||TO_CHAR(PREMIUM,'99g990d00') 
+            When Nvl(Debt_Date,To_Date('31/12/2999','Dd/Mm/Yyyy')) < Trunc(Sysdate) And Trunc(Sysdate) < (Nvl(Cancel_Date,To_Date('31/12/2999','Dd/Mm/Yyyy')) - 10 ) Then
+                'Έχετε ληξιπρόθεσμη οφειλή ποσού € '||TO_CHAR(PREMIUM,'99g990d00')||' που αφορά το συμβόλαιό σας με αριθμό '||CONTRACTNO ||' και αριθμό απόδειξης '|| RECEIPTNO 
+             ELSE
+                'Το συμβόλαιό σας με αριθμό '||CONTRACTNO ||' και αριθμό απόδειξης '|| RECEIPTNO || ' πρόκειται να ακυρωθεί σύντομα.'  
+          END        
+    Where Premium > 0
+      And Ispaid  = 0
+      And Branch != 19
+      And Cancel_Date Is Not Null
+      And Contractno = Oplcyno
+      And Branch     = Ogroup;
+   Commit;              
+   
+   Update Webuser.Portal_Receipt
+      Set (Obligation_Status) =  Case     
+            When Trunc(Sysdate) <= Nvl(Debt_Date,To_Date('31/12/2999','Dd/Mm/Yyyy')) Then 
+                 1
+            When Nvl(Debt_Date,To_Date('31/12/2999','Dd/Mm/Yyyy')) < Trunc(Sysdate) And Trunc(Sysdate) < (Nvl(Cancel_Date,To_Date('31/12/2999','Dd/Mm/Yyyy')) - 10 ) Then
+                2
+             Else
+                3
+          End        
+    Where Premium > 0
+      And Ispaid = 0
+      And Branch != 19
+      And Cancel_Date Is Not Null
+      And Contractno = Oplcyno
+      And Branch     = Ogroup;      
+   Commit;              
+   
+   Update Webuser.Portal_Receipt
+      Set Obligation_Description =  Case     
+            When Trunc(Sysdate) <= Nvl(Debt_Date,To_Date('31/12/2999','dd/mm/yyyy')) - 10  THEN 
+               'Η επόμενη ημερομηνία πληρωμής του συμβολαίου σας με αριθμό '||CONTRACTNO ||' και αριθμό απόδειξης '|| RECEIPTNO ||' είναι '||To_char(DEBT_DATE,'dd/mm/yyyy')||' με ποσό €'||TO_CHAR(PREMIUM,'99g990d00') 
+             ELSE
+                'Το συμβόλαιό σας με αριθμό '||CONTRACTNO ||' και αριθμό απόδειξης '|| RECEIPTNO || ' πρόκειται να ακυρωθεί σύντομα.'  
+          END        
+    Where Premium > 0
+      And Ispaid = 0
+      And Branch = 19
+      And Cancel_Date Is Not Null
+      And Contractno = Oplcyno
+      And Branch     = Ogroup;      
+   Commit;              
+   
+   Update Webuser.Portal_Receipt
+      Set (Obligation_Status) =  Case     
+            When Trunc(Sysdate) <= Nvl(Debt_Date,To_Date('31/12/2999','dd/mm/yyyy')) - 10  THEN 
+                 1
+             Else
+                3
+             End        
+    Where Premium      > 0
+      And Ispaid      = 0
+      And Branch      = 19
+      And Cancel_Date Is Not Null
+      And Contractno = Oplcyno
+      And Branch     = Ogroup;      
+   Commit;             
+End If;
+
+
+
+
+If Otype = 0 Then
+  ONumber := 'End';
+  Ph_Batchprocess_Timestamp(ORunId,OMainProgramm,OSortId,OSubProgramm,ONumber);
+End If;
+
+   OSTATUS := 99;
+   OMSG    := NULL;
+   Commit;
+EXCEPTION
+     WHEN OTHERS THEN
+           Write_Developer_Errors_V2( Substr(Sqlerrm,1,200) , Ostatus, Omsg, Omyid);  
+           Euro.Ph_Batchprocess_Errors (Orunid,Omyid,OMainProgramm,Oprogramunit,ONumber,Ostatus,Omsg);           
+           Portal_Insert_Statistics_v1(ORunId,0,9,1,Omyid,Ostatus,Omsg);        
+           Omsg := Ostatus||' '||Omsg;
+           insert into portal_erros values(Oprogramunit,omsg, sysdate);
+           COMMIT;
+END;
+/
